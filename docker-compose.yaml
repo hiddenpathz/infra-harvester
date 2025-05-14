@@ -1,0 +1,73 @@
+services:
+  # RabbitMQ (только внутренние порты, UI хостится на отдельном порту)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    hostname: rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    ports:
+      - '${RABBIT_UI_PORT}:15672'   # только UI
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  # Kafka Broker (внутренний, без публикации 9092)
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    hostname: kafka
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://proxy:${KAFKA_PROXY_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_BROKER_ID: 1
+    depends_on:
+      - zookeeper
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+  # Zookeeper для Kafka
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    container_name: zookeeper
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    ports:
+      - '2181:2181'
+    volumes:
+      - zookeeper-data:/bitnami/zookeeper
+
+  # Kafka UI (Kafdrop) — публичный порт на хосте
+  kafka-ui:
+    image: obsidiandynamics/kafdrop:latest
+    container_name: kafdrop
+    depends_on:
+      - kafka
+    environment:
+      - KAFKA_BROKERCONNECT=proxy:${KAFKA_PROXY_PORT}
+      - JVM_OPTS=-Xms32M -Xmx64M
+    ports:
+      - '${KAFKA_UI_PORT}:9000'
+
+  # TCP-прокси, только он публикует raw-порты на хост
+  proxy:
+    build:
+      context: ./proxy
+    container_name: tcp-proxy
+    depends_on:
+      - rabbitmq
+      - kafka
+    env_file:
+      - .env
+    ports:
+      - '${RABBIT_PROXY_PORT}:${RABBIT_PROXY_PORT}'   # AMQP прокси
+      - '${KAFKA_PROXY_PORT}:${KAFKA_PROXY_PORT}'     # Kafka прокси
+    environment:
+      - PROXIES
+
+volumes:
+  rabbitmq-data:
+  kafka-data:
+  zookeeper-data:
